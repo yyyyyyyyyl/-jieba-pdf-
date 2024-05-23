@@ -1,0 +1,177 @@
+import jieba
+import jieba.analyse
+import pandas as pd
+from pdfminer.pdfparser import PDFParser
+from pdfminer.pdfdocument import PDFDocument
+from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
+from pdfminer.converter import PDFPageAggregator
+from pdfminer.layout import LTTextBoxHorizontal, LAParams
+from pdfminer.pdfpage import PDFPage, PDFTextExtractionNotAllowed
+import logging
+import os
+import re
+from collections import defaultdict
+import difflib
+
+'''
+该代码运行前需要调整三个变量，即：
+自定义的关键词wordsByMyself
+保存年报pdf的地址dealPdf
+保存拆分后的txt的地址dealTxt
+
+若年报数据量较少，调整好以上变量后即可一次性运行完成，结果将保存到该文件同级目录下
+若年报数据量较大，该程序支持中断，中断后将主程序中的range()的第一个参数改完当前i加1后的取值即可
+'''
+
+
+
+
+# 获取文件夹下的所有文件名称
+def oslist(dealPdf):
+    file_name = list()
+    for i in os.listdir(dealPdf):
+        data_collect = ''.join(i)
+        file_name.append(data_collect)
+    return file_name
+
+
+# 将pdf文件转化成txt文件,并删除换行符
+def pdf_to_txt(dealPdf, name):
+    # 不显示warning
+    logging.propagate = False
+    logging.getLogger().setLevel(logging.ERROR)
+    pdf_filename = dealPdf
+    device = PDFPageAggregator(PDFResourceManager(), laparams=LAParams())
+    interpreter = PDFPageInterpreter(PDFResourceManager(), device)
+    parser = PDFParser(open(pdf_filename, 'rb'))
+    doc = PDFDocument(parser)
+    dealTxt = 'D:\\JavaDevelop\\pdf\\outPutTxt\\'  # 保存txt文件的地址
+    txt_filename = os.path.join(dealTxt, name + '.txt')  # 构建包含文件名的完整文件路径
+    # 检测文档是否提供txt转换，不提供就忽略
+    if not doc.is_extractable:
+        raise PDFTextExtractionNotAllowed
+    else:
+        with open(txt_filename, 'w', encoding="utf-8") as fw:
+            for i, page in enumerate(PDFPage.create_pages(doc)):
+                interpreter.process_page(page)
+                # 接受该页面的LTPage对象
+                layout = device.get_result()
+                # 这里layout是一个LTPage对象 里面存放着 这个page解析出的各种对象
+                for x in layout:
+                    if isinstance(x, LTTextBoxHorizontal):
+                        results = x.get_text()
+                        results = results.replace(' ', '').replace('\n', '')
+                        fw.write(results)
+
+
+
+
+
+# 分词并进行词频统计
+def cut_and_count(outPutTxt,fileNo, stopwords_path):
+    # 加载停用词表
+    stopwords = {}.fromkeys([line.rstrip() for line in open(stopwords_path, encoding='utf-8')])
+
+    with open(outPutTxt, encoding='utf-8') as f:
+        # step1：读取文档并调用jieba分词
+        text = f.read()
+        words = jieba.lcut(text, cut_all=True)
+        """
+        pattern = re.compile(r'[\u4e00-\u9fa5]')
+        chinese_words = [word for word in words if pattern.match(word)]
+        """
+
+
+
+
+
+        # step2:去停用词
+        finalwords = []
+        for word in words:
+            if word not in stopwords:
+                if word != "。" and word != "，":
+                    finalwords.append(word)
+        print(finalwords)
+
+        target_keywords = [
+            "PUE",
+            "GUE",
+            "上云系统",
+            "网络运维费（运行维护费）",
+            "云计算服务",
+            "大数据分析",
+            "大数据平台",
+            "大数据中心（队伍能力提升   数据采购 ）",
+            "大数据发展服务中心",
+            "大数据应用中心",
+            "运行服务",
+            "运维服务",
+            "云服务（x86 高性能存储 互联网链路服务 远程接入服务）",
+            "软件测评",
+            "云计算数据中心",
+            "移动数据",
+            "算力中心（布局研究）",
+            "算力服务",
+            "算力扩容",
+            "算力算法",
+            "数据测试中心（部分硬件）（AI分析算力服务器万兆网卡，含光模块）",
+            "服务器",
+            "超算项目网络安全设备",
+            "超算中心",
+            "超算平台",
+            "智算中心AI智算系统及智算管理平台",
+            "国家级互联网骨干直联点",
+            "出口宽带（数据中心）",
+            "智能算法服务平台",
+            "算力算法",
+            "智联算法",
+            "算法智能解析"
+        ]
+
+
+        # 保存相似词语及其出现次数的字典
+        similar_words = defaultdict(int)
+
+        for keyword in finalwords:
+            # 遍历目标关键词
+            for target_keyword in target_keywords:
+                # 计算相似度
+                similarity = difflib.SequenceMatcher(None, keyword, target_keyword).ratio()
+                # 如果相似度大于阈值，认为是相似词语
+                if similarity > 0.01:  # 你可以根据需求调整阈值
+                    similar_words[keyword] += 1
+
+        # 按出现次数从大到小排序
+        sorted_similar_words = sorted(similar_words.items(), key=lambda x: x[1], reverse=True)
+
+        # 输出结果
+        result = ""
+        for word, count in sorted_similar_words:
+            result += f"{word}: {count}\n"
+
+        output_dir = 'D:\\JavaDevelop\\pdf'
+        output_file = os.path.join(output_dir, 'output.txt')
+
+        # 检查目标文件是否存在，如果不存在则创建
+        if not os.path.exists(output_file):
+            os.makedirs(output_dir, exist_ok=True)  # 确保目录存在
+        # 将结果写入文件
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(result)
+
+
+
+# 主函数
+if __name__ == "__main__":
+    dealPdf = 'D:\\JavaDevelop\\pdf\\dealPdf'  # 保存pdf文件的地址
+    stopwords = 'D:\\JavaDevelop\\pdf\\stopwords.txt'
+    file_name = oslist(dealPdf)
+    fileNum = len(file_name)  # 文件数量
+    # 该程序支持中断，如数据量较大，中断后将range的第一个参数改完当前i的取值即可
+    for i in range(0, len(file_name)):
+        pdf_to_txt(dealPdf + '\\' + file_name[i], file_name[i][:-4])  # 将pdf文件转化成txt文件，传入文件路径
+        print(str(i+1) + '完成转换')
+
+    for i in range(1, fileNum + 1):
+        print(f'----------result {i}----------')
+        cut_and_count('D:\\JavaDevelop\\pdf\\outPutTxt\\' + file_name[i - 1][:-4] + '.txt', i,stopwords)  # 分词并进行词频统计，传入文件路径
